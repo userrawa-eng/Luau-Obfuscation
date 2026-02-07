@@ -1,133 +1,186 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Luau Obfuscator mit luaparse</title>
-  <head>
-  <meta charset="UTF-8" />
-  <title>Luau Obfuscator with luaparse</title>
-  <script src="https://unpkg.com/luaparse@0.3.1/dist/luaparse.min.js"></script>
-  <style>
-    
-  </style>
-</head>
-
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Luau Obfuscator</title>
+<script src="https://unpkg.com/luaparse@0.3.1/dist/luaparse.min.js"></script>
 <style>
-  body { font-family: Arial, sans-serif; max-width: 800px; margin: 2rem auto; }
-  textarea { width: 100%; font-family: monospace; }
-  button { margin: 1rem 0; padding: 0.5rem 1rem; font-size: 1rem; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+      Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+    max-width: 720px;
+    margin: 3rem auto;
+    padding: 0 1rem;
+    background: #f9f9f9;
+    color: #222;
+  }
+  h1 {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+  label {
+    font-weight: 500;
+    display: block;
+    margin: 1.5rem 0 0.5rem 0;
+  }
+  textarea {
+    width: 100%;
+    font-family: monospace;
+    font-size: 0.9rem;
+    min-height: 180px;
+    padding: 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    resize: vertical;
+    background: white;
+    box-sizing: border-box;
+  }
+  button {
+    margin: 1rem 0;
+    padding: 0.6rem 1.2rem;
+    font-size: 1rem;
+    border: none;
+    border-radius: 5px;
+    background-color: #0069ed;
+    color: white;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+  }
+  button:disabled {
+    background-color: #8ab4f8;
+    cursor: not-allowed;
+  }
+  button:hover:not(:disabled) {
+    background-color: #0053ba;
+  }
+  #loading {
+    display: none;
+    margin-top: 0.5rem;
+    font-style: italic;
+    color: #555;
+  }
+  #fileInput {
+    margin-top: 0.25rem;
+  }
 </style>
 </head>
 <body>
 
-<h1>Luau Obfuscator with luaparse</h1>
-<p>Gib deinen Luau Code ein und klicke auf "Obfuscate".</p>
+<h1>Luau Obfuscator</h1>
 
-<textarea id="input" rows="15" placeholder="Hier Luau Code eingeben..."></textarea>
-<button onclick="obfuscate()">Obfuscate</button>
-<textarea id="output" rows="15" placeholder="Obfuscated Code erscheint hier..." readonly></textarea>
+<label for="fileInput">Upload Luau File (.lua or .txt):</label>
+<input type="file" id="fileInput" accept=".lua,.txt" />
 
-<script src="https://unpkg.com/luaparse@0.3.1/dist/luaparse.min.js"></script>
+<label for="input">Or paste Luau code here:</label>
+<textarea id="input" placeholder="Paste your Luau code here..."></textarea>
+
+<button id="btnObfuscate" onclick="obfuscate()">Obfuscate</button>
+<div id="loading">Processing...</div>
+
+<label for="output">Obfuscated Code:</label>
+<textarea id="output" readonly placeholder="Obfuscated code will appear here..."></textarea>
+
 <script>
+  const fileInput = document.getElementById('fileInput');
+  const inputArea = document.getElementById('input');
+  const outputArea = document.getElementById('output');
+  const loading = document.getElementById('loading');
+  const btn = document.getElementById('btnObfuscate');
 
-  function randomName(length = 6) {
+  fileInput.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      inputArea.value = reader.result;
+      outputArea.value = '';
+    };
+    reader.readAsText(file);
+  });
+
+  function randomName(len = 6) {
     const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    let result = '';
-    for (let i = 0; i < length; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    let str = '';
+    for (let i = 0; i < len; i++) {
+      str += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    return result;
+    return str;
   }
-
 
   let varMap = new Map();
 
-
   function renameVariables(node) {
     if (!node || typeof node !== 'object') return;
-
-    // Variablendeklaration
     if (node.type === 'LocalStatement') {
       node.variables.forEach(v => {
         if (v.type === 'Identifier') {
-          if (!varMap.has(v.name)) {
-            varMap.set(v.name, randomName());
-          }
+          if (!varMap.has(v.name)) varMap.set(v.name, randomName());
           v.name = varMap.get(v.name);
         }
       });
     }
-
-    if (node.type === 'Identifier') {
-      if (varMap.has(node.name)) {
-        node.name = varMap.get(node.name);
-      }
+    if (node.type === 'Identifier' && varMap.has(node.name)) {
+      node.name = varMap.get(node.name);
     }
-
-    for (const key in node) {
-      if (node.hasOwnProperty(key)) {
-        const child = node[key];
-        if (Array.isArray(child)) {
-          child.forEach(renameVariables);
-        } else {
-          renameVariables(child);
-        }
+    for (const k in node) {
+      if (node.hasOwnProperty(k)) {
+        const c = node[k];
+        if (Array.isArray(c)) c.forEach(renameVariables);
+        else renameVariables(c);
       }
     }
   }
 
-  
   function astToCode(node) {
     if (!node) return '';
-
     switch (node.type) {
       case 'Chunk':
         return node.body.map(astToCode).join('\n');
-
       case 'LocalStatement':
         return 'local ' + node.variables.map(v => v.name).join(', ') + ' = ' + node.init.map(astToCode).join(', ');
-
       case 'NumericLiteral':
         return node.value;
-
       case 'StringLiteral':
         return `"${node.value}"`;
-
       case 'Identifier':
         return node.name;
-
       case 'CallStatement':
         return astToCode(node.expression);
-
       case 'CallExpression':
         return astToCode(node.base) + '(' + node.arguments.map(astToCode).join(', ') + ')';
-
       case 'BinaryExpression':
         return astToCode(node.left) + ' ' + node.operator + ' ' + astToCode(node.right);
-
       case 'AssignmentStatement':
         return node.variables.map(astToCode).join(', ') + ' = ' + node.init.map(astToCode).join(', ');
-
       case 'ReturnStatement':
         return 'return ' + node.arguments.map(astToCode).join(', ');
-
       default:
-        return '-- unsupported node type: ' + node.type;
+        return '';
     }
   }
 
-  function obfuscate() {
-    const inputCode = document.getElementById('input').value;
+  async function obfuscate() {
+    const code = inputArea.value.trim();
+    if (!code) return;
+    outputArea.value = '';
+    loading.style.display = 'block';
+    btn.disabled = true;
     varMap.clear();
 
+    await new Promise(r => setTimeout(r, 50)); // Allow UI update
+
     try {
-      const ast = luaparse.parse(inputCode, { locations: false, comments: false });
+      const ast = luaparse.parse(code, { locations: false, comments: false });
       renameVariables(ast);
-      const obfuscatedCode = astToCode(ast);
-      document.getElementById('output').value = obfuscatedCode;
-    } catch (e) {
-      document.getElementById('output').value = 'Fehler beim Parsen: ' + e.message;
+      const obfuscated = astToCode(ast);
+      outputArea.value = obfuscated || '-- Unable to generate obfuscated code';
+    } catch (err) {
+      outputArea.value = 'Parse error: ' + err.message;
     }
+
+    loading.style.display = 'none';
+    btn.disabled = false;
   }
 </script>
 
