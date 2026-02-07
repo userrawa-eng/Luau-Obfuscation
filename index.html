@@ -3,185 +3,395 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Luau Obfuscator</title>
-<script src="https://unpkg.com/luaparse@0.3.1/dist/luaparse.min.js"></script>
+<title>Luau Obfuscator Terminal</title>
 <style>
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
-      Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
-    max-width: 720px;
-    margin: 3rem auto;
-    padding: 0 1rem;
-    background: #f9f9f9;
-    color: #222;
+  body, html {
+    margin:0; padding:0; height:100%;
+    background: #0f0f0f;
+    color: #d0d0d0;
+    font-family: "Courier New", Courier, monospace;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
   }
-  h1 {
-    font-weight: 600;
-    margin-bottom: 0.5rem;
+  #terminal {
+    flex: 1;
+    padding: 1rem;
+    overflow-y: auto;
+    background: #111;
+    white-space: pre-wrap;
+    user-select: text;
   }
-  label {
-    font-weight: 500;
-    display: block;
-    margin: 1.5rem 0 0.5rem 0;
+  #input-line {
+    display: flex;
+    padding: 0.5rem 1rem;
+    background: #222;
+    border-top: 1px solid #333;
   }
-  textarea {
-    width: 100%;
-    font-family: monospace;
-    font-size: 0.9rem;
-    min-height: 180px;
-    padding: 0.5rem;
-    border: 1px solid #ccc;
-    border-radius: 5px;
-    resize: vertical;
-    background: white;
-    box-sizing: border-box;
+  #input-prompt {
+    color: #6fdb6f;
+    margin-right: 0.5rem;
+    user-select: none;
   }
-  button {
-    margin: 1rem 0;
-    padding: 0.6rem 1.2rem;
-    font-size: 1rem;
+  #command-input {
+    flex: 1;
+    background: transparent;
     border: none;
-    border-radius: 5px;
-    background-color: #0069ed;
-    color: white;
-    cursor: pointer;
-    transition: background-color 0.2s ease;
+    color: #d0d0d0;
+    font-family: monospace;
+    font-size: 1rem;
+    outline: none;
   }
-  button:disabled {
-    background-color: #8ab4f8;
-    cursor: not-allowed;
-  }
-  button:hover:not(:disabled) {
-    background-color: #0053ba;
-  }
-  #loading {
-    display: none;
-    margin-top: 0.5rem;
-    font-style: italic;
+  #command-input::placeholder {
     color: #555;
   }
   #fileInput {
-    margin-top: 0.25rem;
+    display: none;
+  }
+  .output-error {
+    color: #f66;
+  }
+  .output-info {
+    color: #6fdb6f;
+  }
+  .output-command {
+    color: #4f9f4f;
+  }
+  .output-code {
+    color: #ccc;
+    background: #222;
+    padding: 0.5rem;
+    margin: 0.5rem 0;
+    white-space: pre-wrap;
+    border-radius: 4px;
   }
 </style>
 </head>
 <body>
 
-<h1>Luau Obfuscator</h1>
+<div id="terminal"></div>
 
-<label for="fileInput">Upload Luau File (.lua or .txt):</label>
+<div id="input-line">
+  <div id="input-prompt">user@luau-obfuscator:$</div>
+  <input id="command-input" autocomplete="off" autofocus placeholder="Type 'help' for commands" />
+</div>
+
 <input type="file" id="fileInput" accept=".lua,.txt" />
 
-<label for="input">Or paste Luau code here:</label>
-<textarea id="input" placeholder="Paste your Luau code here..."></textarea>
-
-<button id="btnObfuscate" onclick="obfuscate()">Obfuscate</button>
-<div id="loading">Processing...</div>
-
-<label for="output">Obfuscated Code:</label>
-<textarea id="output" readonly placeholder="Obfuscated code will appear here..."></textarea>
-
 <script>
+  const terminal = document.getElementById('terminal');
+  const cmdInput = document.getElementById('command-input');
   const fileInput = document.getElementById('fileInput');
-  const inputArea = document.getElementById('input');
-  const outputArea = document.getElementById('output');
-  const loading = document.getElementById('loading');
-  const btn = document.getElementById('btnObfuscate');
 
-  fileInput.addEventListener('change', e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      inputArea.value = reader.result;
-      outputArea.value = '';
-    };
-    reader.readAsText(file);
-  });
+  let codeContent = '';
+  let varMap = null;
+
+  function printLine(text, cssClass = '') {
+    const div = document.createElement('div');
+    if(cssClass) div.classList.add(cssClass);
+    div.textContent = text;
+    terminal.appendChild(div);
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+
+  function printCodeBlock(text) {
+    const div = document.createElement('pre');
+    div.classList.add('output-code');
+    div.textContent = text;
+    terminal.appendChild(div);
+    terminal.scrollTop = terminal.scrollHeight;
+  }
 
   function randomName(len = 6) {
     const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
     let str = '';
-    for (let i = 0; i < len; i++) {
-      str += chars.charAt(Math.floor(Math.random() * chars.length));
+    for(let i=0; i<len; i++) {
+      str += chars.charAt(Math.floor(Math.random()*chars.length));
     }
     return str;
   }
 
-  let varMap = new Map();
+  function findVariables(code) {
+    const varRegex = /local\s+([a-zA-Z_][a-zA-Z0-9_]*)/g;
+    let vars = new Set();
+    let match;
+    while((match = varRegex.exec(code)) !== null) {
+      vars.add(match[1]);
+    }
+    return Array.from(vars);
+  }
 
-  function renameVariables(node) {
-    if (!node || typeof node !== 'object') return;
-    if (node.type === 'LocalStatement') {
-      node.variables.forEach(v => {
-        if (v.type === 'Identifier') {
-          if (!varMap.has(v.name)) varMap.set(v.name, randomName());
-          v.name = varMap.get(v.name);
-        }
+  function obfuscateCode(code) {
+    code = code.replace(/--\[\[[\s\S]*?\]\]/gm, '');
+    code = code.replace(/--.*$/gm, '');
+    if(varMap === null) {
+      varMap = {};
+      const vars = findVariables(code);
+      vars.forEach(v => {
+        varMap[v] = randomName();
       });
     }
-    if (node.type === 'Identifier' && varMap.has(node.name)) {
-      node.name = varMap.get(node.name);
-    }
-    for (const k in node) {
-      if (node.hasOwnProperty(k)) {
-        const c = node[k];
-        if (Array.isArray(c)) c.forEach(renameVariables);
-        else renameVariables(c);
-      }
-    }
+    Object.keys(varMap).forEach(orig => {
+      const re = new RegExp('\\b' + orig + '\\b', 'g');
+      code = code.replace(re, varMap[orig]);
+    });
+    code = code
+      .replace(/\n+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\s*([=+*\/\-\(\),])\s*/g, '$1')
+      .trim();
+    return code;
   }
 
-  function astToCode(node) {
-    if (!node) return '';
-    switch (node.type) {
-      case 'Chunk':
-        return node.body.map(astToCode).join('\n');
-      case 'LocalStatement':
-        return 'local ' + node.variables.map(v => v.name).join(', ') + ' = ' + node.init.map(astToCode).join(', ');
-      case 'NumericLiteral':
-        return node.value;
-      case 'StringLiteral':
-        return `"${node.value}"`;
-      case 'Identifier':
-        return node.name;
-      case 'CallStatement':
-        return astToCode(node.expression);
-      case 'CallExpression':
-        return astToCode(node.base) + '(' + node.arguments.map(astToCode).join(', ') + ')';
-      case 'BinaryExpression':
-        return astToCode(node.left) + ' ' + node.operator + ' ' + astToCode(node.right);
-      case 'AssignmentStatement':
-        return node.variables.map(astToCode).join(', ') + ' = ' + node.init.map(astToCode).join(', ');
-      case 'ReturnStatement':
-        return 'return ' + node.arguments.map(astToCode).join(', ');
+  function saveFile(filename, content) {
+    const blob = new Blob([content], {type: 'text/plain'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || 'code.lua';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function formatCode(code) {
+    let formatted = code.replace(/;/g,';\n').replace(/{/g,'{\n').replace(/}/g,'}\n');
+    formatted = formatted.replace(/\n\s*\n/g,'\n');
+    return formatted.trim();
+  }
+
+  function showStats(code) {
+    const lines = code.split('\n').length;
+    const chars = code.length;
+    const words = code.match(/\b\w+\b/g)?.length || 0;
+    const vars = findVariables(code).length;
+    return `Lines: ${lines} | Chars: ${chars} | Words: ${words} | Local vars: ${vars}`;
+  }
+
+  function handleCommand(cmdLine) {
+    const parts = cmdLine.trim().split(' ');
+    const cmd = parts[0].toLowerCase();
+    const args = parts.slice(1);
+    switch(cmd) {
+      case 'help':
+        printLine('Available commands:', 'output-info');
+        printLine('help           - Show this help');
+        printLine('upload         - Select and upload a .lua or .txt file');
+        printLine('obfuscate      - Obfuscate and minify the current code');
+        printLine('show           - Show current loaded code');
+        printLine('clear          - Clear current loaded code');
+        printLine('exit           - Clear terminal output');
+        printLine('save <file>    - Save current code as file');
+        printLine('lines          - Show number of lines');
+        printLine('vars           - List local variables');
+        printLine('reset          - Reset variable mappings');
+        printLine('uppercase      - Convert code to uppercase');
+        printLine('lowercase      - Convert code to lowercase');
+        printLine('reverse        - Reverse entire code text');
+        printLine('count <word>   - Count occurrences of a word');
+        printLine('clear-output   - Clear only terminal output');
+        printLine('format         - Simple code formatting');
+        printLine('stats          - Show code statistics');
+        printLine('replace <from> <to> - Replace all occurrences');
+        printLine('version        - Show tool version');
+        printLine('time           - Show current time');
+        break;
+
+      case 'upload':
+        fileInput.click();
+        break;
+
+      case 'obfuscate':
+        if(!codeContent) {
+          printLine('No code loaded. Use "upload" or paste code.', 'output-error');
+          break;
+        }
+        printLine('Obfuscating...', 'output-info');
+        setTimeout(() => {
+          try {
+            codeContent = obfuscateCode(codeContent);
+            printCodeBlock(codeContent);
+          } catch(e) {
+            printLine('Obfuscation error: ' + e.message, 'output-error');
+          }
+        }, 100);
+        break;
+
+      case 'show':
+        if(!codeContent) {
+          printLine('No code loaded.', 'output-error');
+          break;
+        }
+        printLine('Current code:', 'output-info');
+        printCodeBlock(codeContent);
+        break;
+
+      case 'clear':
+        codeContent = '';
+        varMap = null;
+        printLine('Code cleared.', 'output-info');
+        break;
+
+      case 'exit':
+        terminal.innerHTML = '';
+        break;
+
+      case 'save':
+        if(!codeContent) {
+          printLine('No code to save.', 'output-error');
+          break;
+        }
+        const fname = args[0] || 'code.lua';
+        saveFile(fname, codeContent);
+        printLine(`Code saved as "${fname}"`, 'output-info');
+        break;
+
+      case 'lines':
+        if(!codeContent) {
+          printLine('No code loaded.', 'output-error');
+          break;
+        }
+        printLine('Lines: ' + codeContent.split('\n').length, 'output-info');
+        break;
+
+      case 'vars':
+        if(!codeContent) {
+          printLine('No code loaded.', 'output-error');
+          break;
+        }
+        const vars = findVariables(codeContent);
+        if(vars.length) {
+          printLine('Local variables: ' + vars.join(', '), 'output-info');
+        } else {
+          printLine('No local variables found.', 'output-info');
+        }
+        break;
+
+      case 'reset':
+        varMap = null;
+        printLine('Variable mappings reset.', 'output-info');
+        break;
+
+      case 'uppercase':
+        if(!codeContent) {
+          printLine('No code loaded.', 'output-error');
+          break;
+        }
+        codeContent = codeContent.toUpperCase();
+        printLine('Code converted to uppercase.', 'output-info');
+        break;
+
+      case 'lowercase':
+        if(!codeContent) {
+          printLine('No code loaded.', 'output-error');
+          break;
+        }
+        codeContent = codeContent.toLowerCase();
+        printLine('Code converted to lowercase.', 'output-info');
+        break;
+
+      case 'reverse':
+        if(!codeContent) {
+          printLine('No code loaded.', 'output-error');
+          break;
+        }
+        codeContent = codeContent.split('').reverse().join('');
+        printLine('Code reversed.', 'output-info');
+        break;
+
+      case 'count':
+        if(!codeContent) {
+          printLine('No code loaded.', 'output-error');
+          break;
+        }
+        if(args.length === 0) {
+          printLine('Specify a word to count.', 'output-error');
+          break;
+        }
+        const word = args[0];
+        const re = new RegExp('\\b' + word + '\\b', 'g');
+        const count = (codeContent.match(re) || []).length;
+        printLine(`Occurrences of "${word}": ${count}`, 'output-info');
+        break;
+
+      case 'clear-output':
+        terminal.innerHTML = '';
+        break;
+
+      case 'format':
+        if(!codeContent) {
+          printLine('No code loaded.', 'output-error');
+          break;
+        }
+        codeContent = formatCode(codeContent);
+        printLine('Code formatted.', 'output-info');
+        break;
+
+      case 'stats':
+        if(!codeContent) {
+          printLine('No code loaded.', 'output-error');
+          break;
+        }
+        printLine(showStats(codeContent), 'output-info');
+        break;
+
+      case 'replace':
+        if(!codeContent) {
+          printLine('No code loaded.', 'output-error');
+          break;
+        }
+        if(args.length < 2) {
+          printLine('Usage: replace <from> <to>', 'output-error');
+          break;
+        }
+        const from = args[0];
+        const to = args.slice(1).join(' ');
+        const reReplace = new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+        codeContent = codeContent.replace(reReplace, to);
+        printLine(`Replaced all "${from}" with "${to}"`, 'output-info');
+        break;
+
+      case 'version':
+        printLine('Luau Obfuscator Terminal v1.0', 'output-info');
+        break;
+
+      case 'time':
+        printLine('Current time: ' + new Date().toLocaleString(), 'output-info');
+        break;
+
       default:
-        return '';
+        printLine('Unknown command: ' + cmd + '. Type "help" for list.', 'output-error');
     }
   }
 
-  async function obfuscate() {
-    const code = inputArea.value.trim();
-    if (!code) return;
-    outputArea.value = '';
-    loading.style.display = 'block';
-    btn.disabled = true;
-    varMap.clear();
-
-    await new Promise(r => setTimeout(r, 50)); // Allow UI update
-
-    try {
-      const ast = luaparse.parse(code, { locations: false, comments: false });
-      renameVariables(ast);
-      const obfuscated = astToCode(ast);
-      outputArea.value = obfuscated || '-- Unable to generate obfuscated code';
-    } catch (err) {
-      outputArea.value = 'Parse error: ' + err.message;
+  fileInput.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if(!file) {
+      printLine('No file selected.', 'output-error');
+      return;
     }
+    const reader = new FileReader();
+    reader.onload = () => {
+      codeContent = reader.result;
+      varMap = null;
+      printLine(`Loaded file: ${file.name}`, 'output-info');
+    };
+    reader.readAsText(file);
+  });
 
-    loading.style.display = 'none';
-    btn.disabled = false;
-  }
+  printLine('Welcome to Luau Obfuscator Terminal!');
+  printLine('Type "help" for a list of commands.', 'output-info');
+
+  cmdInput.addEventListener('keydown', e => {
+    if(e.key === 'Enter') {
+      const input = cmdInput.value.trim();
+      if(!input) return;
+      printLine('user@luau-obfuscator:$ ' + input, 'output-command');
+      cmdInput.value = '';
+      handleCommand(input);
+    }
+  });
 </script>
 
 </body>
