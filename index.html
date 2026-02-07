@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<title>Luau Obfuscator mit luaparse</title>
+  <head>
+  <meta charset="UTF-8" />
+  <title>Luau Obfuscator with luaparse</title>
+  <script src="https://unpkg.com/luaparse@0.3.1/dist/luaparse.min.js"></script>
+  <style>
+    
+  </style>
+</head>
+
+<style>
+  body { font-family: Arial, sans-serif; max-width: 800px; margin: 2rem auto; }
+  textarea { width: 100%; font-family: monospace; }
+  button { margin: 1rem 0; padding: 0.5rem 1rem; font-size: 1rem; }
+</style>
+</head>
+<body>
+
+<h1>Luau Obfuscator with luaparse</h1>
+<p>Gib deinen Luau Code ein und klicke auf "Obfuscate".</p>
+
+<textarea id="input" rows="15" placeholder="Hier Luau Code eingeben..."></textarea>
+<button onclick="obfuscate()">Obfuscate</button>
+<textarea id="output" rows="15" placeholder="Obfuscated Code erscheint hier..." readonly></textarea>
+
+<script src="https://unpkg.com/luaparse@0.3.1/dist/luaparse.min.js"></script>
+<script>
+
+  function randomName(length = 6) {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    let result = '';
+    for (let i = 0; i < length; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+  }
+
+
+  let varMap = new Map();
+
+
+  function renameVariables(node) {
+    if (!node || typeof node !== 'object') return;
+
+    // Variablendeklaration
+    if (node.type === 'LocalStatement') {
+      node.variables.forEach(v => {
+        if (v.type === 'Identifier') {
+          if (!varMap.has(v.name)) {
+            varMap.set(v.name, randomName());
+          }
+          v.name = varMap.get(v.name);
+        }
+      });
+    }
+
+    if (node.type === 'Identifier') {
+      if (varMap.has(node.name)) {
+        node.name = varMap.get(node.name);
+      }
+    }
+
+    for (const key in node) {
+      if (node.hasOwnProperty(key)) {
+        const child = node[key];
+        if (Array.isArray(child)) {
+          child.forEach(renameVariables);
+        } else {
+          renameVariables(child);
+        }
+      }
+    }
+  }
+
+  
+  function astToCode(node) {
+    if (!node) return '';
+
+    switch (node.type) {
+      case 'Chunk':
+        return node.body.map(astToCode).join('\n');
+
+      case 'LocalStatement':
+        return 'local ' + node.variables.map(v => v.name).join(', ') + ' = ' + node.init.map(astToCode).join(', ');
+
+      case 'NumericLiteral':
+        return node.value;
+
+      case 'StringLiteral':
+        return `"${node.value}"`;
+
+      case 'Identifier':
+        return node.name;
+
+      case 'CallStatement':
+        return astToCode(node.expression);
+
+      case 'CallExpression':
+        return astToCode(node.base) + '(' + node.arguments.map(astToCode).join(', ') + ')';
+
+      case 'BinaryExpression':
+        return astToCode(node.left) + ' ' + node.operator + ' ' + astToCode(node.right);
+
+      case 'AssignmentStatement':
+        return node.variables.map(astToCode).join(', ') + ' = ' + node.init.map(astToCode).join(', ');
+
+      case 'ReturnStatement':
+        return 'return ' + node.arguments.map(astToCode).join(', ');
+
+      default:
+        return '-- unsupported node type: ' + node.type;
+    }
+  }
+
+  function obfuscate() {
+    const inputCode = document.getElementById('input').value;
+    varMap.clear();
+
+    try {
+      const ast = luaparse.parse(inputCode, { locations: false, comments: false });
+      renameVariables(ast);
+      const obfuscatedCode = astToCode(ast);
+      document.getElementById('output').value = obfuscatedCode;
+    } catch (e) {
+      document.getElementById('output').value = 'Fehler beim Parsen: ' + e.message;
+    }
+  }
+</script>
+
+</body>
+</html>
